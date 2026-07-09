@@ -14,11 +14,17 @@ if (isset($_COOKIE[session_name()])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Karyashala - Login & Sign Up</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=<?php echo time(); ?>">
 </head>
 <body>
     <div class="form-container">
-        <!-- Application Title -->
+        <!-- Application Logo & Title -->
+        <div class="app-logo-wrapper">
+            <img src="DRDO-logo.png" alt="DRDO Logo" class="app-logo">
+        </div>
         <h1 class="app-title">Karyashala</h1>
         
         <!-- Display GET alerts (success/error messages) -->
@@ -51,18 +57,15 @@ if (isset($_COOKIE[session_name()])) {
             <form action="login_process.php" method="POST" id="login-form">
                 <h2>User Login</h2>
                 <div class="form-group">
-                    <label for="login_ic">IC Number (Employee ID):</label>
+                    <label for="login_ic">IC Number:</label>
                     <input type="text" name="ic_no" id="login_ic" required placeholder="e.g. 1001">
                     <span class="error-text" id="login-ic-error"></span>
                 </div>
                 
                 <div class="form-group">
-                    <label for="login_designation">Designation:</label>
-                    <select name="designation" id="login_designation" required>
-                        <option value="" disabled selected>Select your designation</option>
-                        <option value="admin">Admin</option>
-                        <option value="employee">Employee</option>
-                    </select>
+                    <label for="login_password">Password:</label>
+                    <input type="password" name="password" id="login_password" required placeholder="Enter your password">
+                    <span class="error-text" id="login-password-error"></span>
                 </div>
                 
                 <button type="submit" id="login-submit-btn" class="btn" disabled>Log In</button>
@@ -85,7 +88,7 @@ if (isset($_COOKIE[session_name()])) {
                     <select name="designation" id="signup_designation" required>
                         <option value="" disabled selected>Select designation</option>
                         <option value="admin">Admin</option>
-                        <option value="employee">Employee</option>
+                        <option value="karyashala_admin">Karyashala Admin</option>
                     </select>
                 </div>
 
@@ -101,11 +104,23 @@ if (isset($_COOKIE[session_name()])) {
                     <span class="error-text" id="signup-email-error"></span>
                 </div>
 
+                <div class="form-group">
+                    <label for="signup_password">Password:</label>
+                    <input type="password" name="password" id="signup_password" required placeholder="Min 6 characters">
+                    <span class="error-text" id="signup-password-error"></span>
+                </div>
+
+                <div class="form-group">
+                    <label for="signup_confirm_password">Confirm Password:</label>
+                    <input type="password" name="confirm_password" id="signup_confirm_password" required placeholder="Re-enter password">
+                    <span class="error-text" id="signup-confirm-password-error"></span>
+                </div>
+
                 <button type="submit" id="signup-submit-btn" class="btn" disabled>Sign Up</button>
             </form>
         </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=<?php echo time(); ?>"></script>
 </body>
 </html>

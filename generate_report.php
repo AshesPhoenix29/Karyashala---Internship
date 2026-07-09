@@ -16,10 +16,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit();
 }
 
-$selectedEmployees = isset($_POST['employees']) ? $_POST['employees'] : [];
+$selectedKaryashalaAdmins = isset($_POST['karyashala_admins']) ? $_POST['karyashala_admins'] : [];
 
-if (empty($selectedEmployees) || !is_array($selectedEmployees)) {
-    header("Location: dashboard.php?panel=employees-report&error=" . urlencode("Please select at least one employee."));
+if (empty($selectedKaryashalaAdmins) || !is_array($selectedKaryashalaAdmins)) {
+    header("Location: dashboard.php?panel=karyashala-admins-report&error=" . urlencode("Please select at least one Karyashala Admin."));
     exit();
 }
 
@@ -31,18 +31,18 @@ $reportData = [
     'year_current' => $currentYear,
     'year_previous' => $previousYear,
     'generated_by' => $_SESSION['user_name'],
-    'employees' => []
+    'employees' => [] // We can keep 'employees' key for compatibility, or use both for security
 ];
 
 try {
-    // Query comparison statistics for each selected employee
+    // Query comparison statistics for each selected Karyashala Admin
     $query = "
         SELECT 
             e.ic_no, 
             e.name,
             SUM(CASE WHEN YEAR(w.attended_date) = ? THEN 1 ELSE 0 END) as count_current,
             SUM(CASE WHEN YEAR(w.attended_date) = ? THEN 1 ELSE 0 END) as count_previous
-        FROM employee e
+        FROM karyashala_admin e
         LEFT JOIN workshops w ON e.ic_no = w.ic_no
         WHERE e.ic_no = ?
         GROUP BY e.ic_no, e.name
@@ -51,7 +51,7 @@ try {
     $stmt = mysqli_prepare($conn, $query);
 
     if ($stmt) {
-        foreach ($selectedEmployees as $empId) {
+        foreach ($selectedKaryashalaAdmins as $empId) {
             $empIdInt = (int)$empId;
             mysqli_stmt_bind_param($stmt, "iii", $currentYear, $previousYear, $empIdInt);
             mysqli_stmt_execute($stmt);
@@ -67,12 +67,12 @@ try {
         }
         mysqli_stmt_close($stmt);
     } else {
-        header("Location: dashboard.php?panel=employees-report&error=" . urlencode("Failed to prepare stats query."));
+        header("Location: dashboard.php?panel=karyashala-admins-report&error=" . urlencode("Failed to prepare stats query."));
         exit();
     }
 
     if (empty($reportData['employees'])) {
-        header("Location: dashboard.php?panel=employees-report&error=" . urlencode("No valid employee records found for selected IDs."));
+        header("Location: dashboard.php?panel=karyashala-admins-report&error=" . urlencode("No valid Karyashala Admin records found for selected IDs."));
         exit();
     }
 
@@ -91,16 +91,16 @@ try {
             header("Location: dashboard.php?panel=admin-reports&success=" . urlencode("Report successfully generated."));
             exit();
         } else {
-            header("Location: dashboard.php?panel=employees-report&error=" . urlencode("Failed to save report to database."));
+            header("Location: dashboard.php?panel=karyashala-admins-report&error=" . urlencode("Failed to save report to database."));
             exit();
         }
     } else {
-        header("Location: dashboard.php?panel=employees-report&error=" . urlencode("Failed to prepare report storage query."));
+        header("Location: dashboard.php?panel=karyashala-admins-report&error=" . urlencode("Failed to prepare report storage query."));
         exit();
     }
 
 } catch (Exception $e) {
-    header("Location: dashboard.php?panel=employees-report&error=" . urlencode("An error occurred: " . $e->getMessage()));
+    header("Location: dashboard.php?panel=karyashala-admins-report&error=" . urlencode("An error occurred: " . $e->getMessage()));
     exit();
 }
 ?>

@@ -3,8 +3,8 @@ if (isset($_COOKIE[session_name()])) {
     session_start();
 }
 
-// Ensure user is logged in as Employee
-if (!isset($_SESSION['user_ic']) || $_SESSION['user_designation'] !== 'employee') {
+// Ensure user is logged in as Karyashala Admin
+if (!isset($_SESSION['user_ic']) || $_SESSION['user_designation'] !== 'karyashala_admin') {
     header("Location: index.php?error=" . urlencode("Unauthorized access."));
     exit();
 }
