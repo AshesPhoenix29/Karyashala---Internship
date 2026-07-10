@@ -1,6 +1,6 @@
 # Karyashala
 
-A workshop attendance management system built with procedural PHP and MySQL. This document serves as a technical reference for understanding how the application works internally — how the pieces connect, why certain decisions were made, and how data flows through the system.
+A workshop attendance management system built with procedural PHP and MySQL, designed for managing employee records, tracking workshop attendances, and performing admin verifications. This document serves as a technical reference for understanding how the application works internally — how the pieces connect, why certain decisions were made, and how data flows through the system.
 
 ---
 
@@ -17,7 +17,7 @@ A workshop attendance management system built with procedural PHP and MySQL. Thi
    - [How IC Numbers Are Generated](#how-ic-numbers-are-generated)
    - [Duplicate Email Prevention](#duplicate-email-prevention)
 6. [Login Flow](#login-flow)
-   - [Why There Is No Password](#why-there-is-no-password)
+   - [Password Verification](#password-verification)
    - [Where the Session Begins](#where-the-session-begins)
 7. [Session Management](#session-management)
    - [Conditional Session Startup](#conditional-session-startup)
@@ -25,15 +25,15 @@ A workshop attendance management system built with procedural PHP and MySQL. Thi
 8. [Dashboard Architecture](#dashboard-architecture)
    - [Sidebar Navigation](#sidebar-navigation)
    - [Panel Switching](#panel-switching)
-   - [Role-Based Rendering](#role-based-rendering)
-9. [Admin Features](#admin-features)
-   - [View Employees](#view-employees)
-   - [Update Employees](#update-employees)
-   - [Generate Reports](#generate-reports)
-   - [View Reports](#view-reports)
-10. [Employee Features](#employee-features)
-    - [Add Workshop](#add-workshop)
-    - [View Workshop History](#view-workshop-history)
+   - [Role-Based Access Control](#role-based-access-control)
+9. [Core Features](#core-features)
+   - [View Employees Directory](#view-employees-directory)
+   - [Update Employee Info & Workshops](#update-employee-info--workshops)
+   - [Add Employee](#add-employee)
+   - [Delete Employee](#delete-employee)
+10. [Admin Verification System](#admin-verification-system)
+    - [Verification Panel](#verification-panel)
+    - [Verified Records Audit Log](#verified-records-audit-log)
 11. [Logout Process](#logout-process)
 12. [Client-Side Validation](#client-side-validation)
 13. [Running the Application](#running-the-application)
@@ -56,22 +56,25 @@ No external PHP libraries, Composer packages, or frameworks are used. The entire
 
 ```
 Karyashala/
-├── db.php                 # Database connection (used by every backend file)
-├── schema.sql             # SQL file that creates the database and all tables
-├── index.php              # Login and Sign Up page (the entry point)
-├── register.php           # Handles the Sign Up form submission
-├── login_process.php      # Handles the Login form submission
-├── dashboard.php          # The main dashboard (renders different panels)
-├── update_employee.php    # Processes employee detail updates (Admin only)
-├── add_workshop.php       # Processes new workshop entries (Employee only)
-├── generate_report.php    # Compiles and stores attendance reports (Admin only)
-├── logout.php             # Destroys the session and redirects
-├── style.css              # All CSS styles for every page
-├── script.js              # All JavaScript for validation, modals, sidebar
-└── README.md              # This file
+├── db.php                     # Database connection (used by every backend file)
+├── schema.sql                 # SQL file that creates the database and all tables
+├── index.php                  # Login and Sign Up page (the entry point)
+├── register.php               # Handles the Sign Up form submission
+├── login_process.php          # Handles the Login form submission with password verification
+├── dashboard.php              # The main dashboard (renders panels based on roles)
+├── add_employee_process.php   # Processes adding a new employee & workshop (Admin/Karyashala Admin)
+├── delete_employee.php        # Processes employee record deletion (Admin/Karyashala Admin)
+├── update_karyashala_admin.php # Processes employee profile and workshop updates (Admin/Karyashala Admin)
+├── verify_employee.php        # Inserts verified record logs for a specific year (Admin only)
+├── logout.php                 # Destroys the session and redirects
+├── style.css                  # All CSS styles for every page
+├── script.js                  # JavaScript for validation, modals, sidebar tabs, and dynamic workshop inputs
+├── DRDO-logo.png              # App logo image asset
+├── generate_report.php        # Stale/Retired report generation script (Admin only, not linked in UI)
+└── README.md                  # This file
 ```
 
-The application does not use a router or MVC framework. Each `.php` file is either a **page** (renders HTML) or a **processor** (handles form data and redirects). The two page files are `index.php` and `dashboard.php`. Everything else is a processor — they receive POST data, do their work, and redirect back with a success or error message in the URL.
+The application does not use a router or MVC framework. Each `.php` file is either a **page** (renders HTML) or a **processor** (handles form data and redirects). The two main page files are `index.php` and `dashboard.php`. Everything else is a processor — they receive POST data, do their work, and redirect back with a success or error message in the URL.
 
 ---
 
@@ -102,7 +105,7 @@ GRANT ALL PRIVILEGES ON karyashala.* TO 'library_user'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
-This creates the user and gives it full control over the `karyashala` database only.
+This creates the user and gives it privileges over the `karyashala` database.
 
 ### Running the Schema
 
@@ -118,151 +121,147 @@ Or if you are already inside the MySQL shell:
 SOURCE /full/path/to/Karyashala/schema.sql;
 ```
 
-This creates the `karyashala` database (if it doesn't already exist) and sets up all four tables.
+This creates the `karyashala` database (if it doesn't already exist) and sets up all five tables.
+
+---
 
 ### Schema Explanation
 
-The database has four tables. Here is what each one stores and why it is structured the way it is:
+The database consists of five tables designed to separate administrative privileges and maintain historical records:
 
-#### `admin`
+#### 1. `admin`
+Stores system administrators who have super privileges, including the ability to audit and verify workshop records.
 
-| Column      | Type         | Notes                                  |
-|-------------|--------------|----------------------------------------|
-| ic_no       | INT          | Primary key. The unique employee ID.   |
-| name        | VARCHAR(100) | Full name of the admin.                |
-| designation | VARCHAR(20)  | Always `'admin'`. Stored explicitly.   |
-| phone       | VARCHAR(20)  | 10-digit phone number.                 |
-| email       | VARCHAR(100) | Unique. No two users share an email.   |
-| created_at  | TIMESTAMP    | Auto-filled when the row is inserted.  |
+| Column | Type | Notes |
+| :--- | :--- | :--- |
+| `ic_no` | INT | Primary key. Unique administrator ID. |
+| `name` | VARCHAR(100) | Full name of the administrator. |
+| `designation`| VARCHAR(20) | Defaults to `'admin'`. |
+| `phone` | VARCHAR(20) | 10-digit mobile number. |
+| `email` | VARCHAR(100) | Unique. Used for verification and uniqueness checks. |
+| `password` | VARCHAR(255) | Hashed password string. |
+| `created_at` | TIMESTAMP | Auto-filled when the row is inserted. |
 
-#### `employee`
+#### 2. `karyashala_admin`
+Stores employees/directory managers. These users can view, add, delete, and update employee entries and workshops, but do not have auditing/verification access.
 
-Has the exact same columns as `admin`. The `designation` column defaults to `'employee'`.
+| Column | Type | Notes |
+| :--- | :--- | :--- |
+| `ic_no` | INT | Primary key. Unique employee ID. |
+| `name` | VARCHAR(100) | Full name of the employee. |
+| `designation`| VARCHAR(20) | Defaults to `'karyashala_admin'` but can be customized. |
+| `phone` | VARCHAR(20) | 10-digit mobile number. |
+| `email` | VARCHAR(100) | Unique. |
+| `password` | VARCHAR(255) | Hashed password string (set to `'NO_LOGIN'` for dashboard-added employees). |
+| `remark` | TEXT | Optional custom notes or remarks about the employee. |
+| `created_at` | TIMESTAMP | Auto-filled when the row is inserted. |
 
-**Why two separate tables instead of one?** This is a deliberate design choice for a student-level project. It keeps queries simpler — when you log in as admin, the code only checks the `admin` table; when you log in as employee, it only checks `employee`. There is no need for a WHERE clause filtering by role. It also means the `workshops` foreign key only references `employee`, which is semantically correct since admins do not attend workshops.
+#### 3. `workshops`
+Contains details of the workshops attended by employees.
 
-#### `workshops`
+| Column | Type | Notes |
+| :--- | :--- | :--- |
+| `id` | INT | Auto-incrementing primary key. |
+| `ic_no` | INT | Foreign key → `karyashala_admin.ic_no`. |
+| `title` | VARCHAR(255) | Title/Name of the workshop attended. |
+| `attended_date`| DATE | The date of attendance. |
+| `created_at` | TIMESTAMP | Auto-filled when inserted. |
 
-| Column        | Type         | Notes                                         |
-|---------------|--------------|-----------------------------------------------|
-| id            | INT          | Auto-incrementing primary key.                |
-| ic_no         | INT          | Foreign key → `employee.ic_no`.               |
-| title         | VARCHAR(255) | Name of the workshop attended.                |
-| attended_date | DATE         | The date the workshop was attended.           |
-| created_at    | TIMESTAMP    | When this record was added to the system.     |
+The foreign key has `ON DELETE CASCADE` — if an employee is deleted from the `karyashala_admin` table, all their workshop records are automatically removed.
 
-The foreign key has `ON DELETE CASCADE` — if an employee is deleted from the `employee` table, all their workshop records are automatically removed too.
+#### 4. `verified_records`
+Logs verification audits performed by system administrators.
 
-#### `reports`
+| Column | Type | Notes |
+| :--- | :--- | :--- |
+| `id` | INT | Auto-incrementing primary key. |
+| `ic_no` | INT | Foreign key → `karyashala_admin.ic_no`. |
+| `year` | INT | The specific year of workshop attendance being verified. |
+| `verified_at`| TIMESTAMP | Auto-filled when verified. |
+| `verified_by`| INT | The ID of the admin who verified the record. |
 
-| Column     | Type         | Notes                                         |
-|------------|--------------|-----------------------------------------------|
-| id         | INT          | Auto-incrementing primary key.                |
-| title      | VARCHAR(255) | Human-readable title like "Workshop Attendance Report (2025 - 2026)". |
-| content    | TEXT         | A JSON string containing the full report data.|
-| created_at | TIMESTAMP    | When the report was generated.                |
+Has a unique constraint on `(ic_no, year)` preventing multiple verifications for the same employee in a single year, and cascades `ON DELETE CASCADE` when the corresponding employee is deleted.
 
-Reports are stored as JSON inside a TEXT column. This means the report data is self-contained — it captures the state at the time of generation. Even if employee names or workshop counts change later, the historical report remains unchanged.
+#### 5. `reports` (Stale)
+Used historically for compiling attendance statistics. Present for reference but not linked in the current UI.
 
 ---
 
 ## How the Application Starts
 
-The entry point is `index.php`. When a user navigates to the site, here is what happens:
+The entry point is `index.php`. When a user navigates to the site:
 
 1. PHP checks if a session cookie already exists in the browser (`$_COOKIE[session_name()]`).
-2. If the cookie exists, `session_start()` is called and the session data is loaded.
-3. If the session contains `user_ic` (meaning the user previously logged in and hasn't logged out), they are immediately redirected to `dashboard.php`.
-4. If no session cookie exists, no session is started. The page renders the Login/Sign Up tabs as plain HTML with no server-side session overhead.
-
-This means a first-time visitor to the site never triggers a session. Sessions are only created during a successful login.
+2. If the cookie exists, `session_start()` is called and session data is loaded.
+3. If the session contains `user_ic` (meaning the user is logged in), they are immediately redirected to `dashboard.php`.
+4. If no session cookie exists, no session is started. The page renders the Login/Sign Up tabs as plain HTML.
 
 ---
 
 ## Registration Flow
 
-When a user fills out the Sign Up form and submits it, the form POSTs to `register.php`. Here is the step-by-step process:
+When a user registers via the public signup tab, the form POSTs to `register.php`:
 
-1. **Method check** — If someone tries to access `register.php` via GET (e.g., typing the URL directly), they are redirected to `index.php`.
-
-2. **Input collection** — The four fields (`name`, `designation`, `phone`, `email`) are extracted from `$_POST` and trimmed.
-
-3. **Server-side validation** — Five checks run in order:
-   - Are all fields non-empty?
-   - Is the designation either `'admin'` or `'employee'`?
-   - Is the email a valid format? (`filter_var` with `FILTER_VALIDATE_EMAIL`)
-   - Is the phone exactly 10 digits? (regex: `/^\d{10}$/`)
-
-4. **Duplicate email check** — A UNION query searches both the `admin` and `employee` tables for the submitted email. If found, registration is rejected.
-
-5. **IC number generation** — See section below.
-
-6. **Insertion** — A prepared statement inserts the new record into either `admin` or `employee` depending on the chosen designation.
-
-7. **Redirect** — On success, the user is sent to `index.php?success=<IC_NUMBER>`, where the IC number is displayed so they can write it down. On failure, they are sent to `index.php?error=<message>`.
-
-**Important:** No session is started during registration. The user must log in separately after signing up.
+1. **Method Check** — Redirects GET requests to `index.php`.
+2. **Input Collection** — Name, Designation (`admin` or `karyashala_admin`), Phone, Email, Password, and Confirm Password are collected.
+3. **Server-Side Validation**:
+   - Checks that all fields are non-empty.
+   - Ensures designation is either `'admin'` or `'karyashala_admin'`.
+   - Validates email format.
+   - Ensures phone number is exactly 10 digits.
+   - Requires password length to be at least 6 characters.
+   - Checks that password and confirm password match.
+4. **Duplicate Email Check** — Queries both `admin` and `karyashala_admin` using a `UNION` statement to prevent duplicate accounts.
+5. **IC Number Generation** — Allocates the first free number starting from `1001` (see below).
+6. **Password Hashing** — Hashes the password using `password_hash($password, PASSWORD_DEFAULT)`.
+7. **Insertion** — Saves the record in either `admin` or `karyashala_admin` depending on the selection.
+8. **Redirect** — Sends the user back to `index.php` with their newly generated IC number on success, or an error banner on failure.
 
 ### How IC Numbers Are Generated
 
-IC numbers are sequential integers starting at `1001`. The system finds the current maximum IC number across both tables using:
+To prevent gaps and conflicts, IC numbers are globally unique positive integers. The system fetches all allocated IC numbers from both tables using a `UNION` query:
 
 ```sql
-SELECT MAX(ic_no) as max_ic FROM (
-    SELECT ic_no FROM admin
-    UNION ALL
-    SELECT ic_no FROM employee
-) AS combined
+SELECT ic_no FROM admin
+UNION ALL
+SELECT ic_no FROM karyashala_admin
+ORDER BY ic_no ASC
 ```
 
-If the result is `NULL` (no users exist yet), the first IC is `1001`. Otherwise, it increments by 1. This means IC numbers are globally unique across both admin and employee tables — no admin and employee will ever share the same IC number.
+It then initializes `nextIc = 1001` and increments it sequentially until it finds the first integer not present in the allocated set.
 
 ### Duplicate Email Prevention
 
-Emails must be unique across both tables. The check uses:
+Email uniqueness is verified across the entire system using:
 
 ```sql
 SELECT email FROM (
     SELECT email FROM admin WHERE email = ?
     UNION ALL
-    SELECT email FROM employee WHERE email = ?
+    SELECT email FROM karyashala_admin WHERE email = ?
 ) AS combined LIMIT 1
 ```
-
-If this returns any rows, the email is already taken. The `?` placeholders are bound using `mysqli_stmt_bind_param`, which protects against SQL injection.
 
 ---
 
 ## Login Flow
 
-The Login form asks for two things: an IC number and a designation (Admin or Employee). There is no password field.
+The login tab takes an **IC Number** and **Password** (designation is determined automatically by the server):
 
-When the form is submitted, it POSTs to `login_process.php`:
+1. **Validation** — Verifies fields are non-empty and IC number contains only digits.
+2. **Lookup & Table Routing**:
+   - Query `admin` table for the IC number. If found, verify the password using `password_verify()`.
+   - If not found in `admin` (or verification fails), query `karyashala_admin`. If found, verify password.
+3. **Success Path** — Starts the session and populates session variables (`user_ic`, `user_name`, `user_designation`, `user_email`, `user_phone`). Redirects to `dashboard.php`.
+4. **Failure Path** — Redirects back to `index.php` with an error parameter.
 
-1. **Validation** — IC number must be non-empty and contain only digits. Designation must be `'admin'` or `'employee'`.
+### Password Verification
 
-2. **Table selection** — Based on the designation, the code queries either the `admin` or `employee` table.
-
-3. **Lookup** — A prepared statement runs `SELECT * FROM <table> WHERE ic_no = ? LIMIT 1`.
-
-4. **Success path** — If a matching row is found, `session_start()` is called and five session variables are set:
-   - `$_SESSION['user_ic']`
-   - `$_SESSION['user_name']`
-   - `$_SESSION['user_designation']`
-   - `$_SESSION['user_email']`
-   - `$_SESSION['user_phone']`
-
-   The user is then redirected to `dashboard.php`.
-
-5. **Failure path** — If no matching row is found, the user is redirected back to `index.php` with an error message.
-
-### Why There Is No Password
-
-This is a simplified authentication model suitable for a learning project. In a production system, you would hash passwords with `password_hash()` and verify them with `password_verify()`. Here, the IC number combined with the correct designation acts as the credential.
+Unlike earlier iterations, password security is strictly enforced. Passwords are saved as standard `PASSWORD_DEFAULT` hashes and verified at login using PHP's native `password_verify` function.
 
 ### Where the Session Begins
 
-The session is created in exactly one place in the entire codebase: inside `login_process.php`, on the line `session_start()`, and only after the database lookup has confirmed the user exists. This is by design — sessions should only be created when there is something meaningful to store.
+Sessions are initialized dynamically in `login_process.php` using `session_start()` only after credentials have been verified.
 
 ---
 
@@ -270,7 +269,7 @@ The session is created in exactly one place in the entire codebase: inside `logi
 
 ### Conditional Session Startup
 
-Most PHP tutorials put `session_start()` at the very top of every page. This project intentionally avoids that pattern. Instead, pages that need session data check for the session cookie first:
+Pages requiring session access implement a conditional check before loading session files, minimizing disk read overhead for guests or bots:
 
 ```php
 if (isset($_COOKIE[session_name()])) {
@@ -278,183 +277,119 @@ if (isset($_COOKIE[session_name()])) {
 }
 ```
 
-**Why?** Calling `session_start()` unconditionally means PHP creates a session file on disk for every single request — even from bots, crawlers, or unauthenticated users who will never use it. The conditional check prevents this. If the browser does not send a session cookie, it means no session was ever created for this visitor, so there is nothing to resume.
-
-This pattern is used in:
-- `index.php` — To check if the user is already logged in (redirect to dashboard).
-- `dashboard.php` — To load user data from the session.
-- `update_employee.php` — To verify admin authorization.
-- `add_workshop.php` — To verify employee authorization.
-- `generate_report.php` — To verify admin authorization.
-
-The only file that calls `session_start()` unconditionally is `logout.php`, because you need an active session in order to destroy it.
+This pattern is active across `index.php`, `dashboard.php`, `add_employee_process.php`, `delete_employee.php`, `update_karyashala_admin.php`, and `verify_employee.php`.
 
 ### How Alerts Work Without Sessions
 
-Error and success messages are passed via URL query parameters, not session flash messages. For example:
-
-```
-index.php?error=Invalid+IC+Number
-dashboard.php?panel=employees-update&success=Employee+updated+successfully
-```
-
-The receiving page reads these with `$_GET['error']` or `$_GET['success']` and renders them as HTML alert banners. This approach has two benefits:
-1. No session is required to display messages.
-2. The message is visible in the URL, which makes debugging easier.
+Error and success alerts are passed via URL query parameters (e.g., `?success=...` or `?error=...`). The destination page reads these parameters and displays visual banners. This keeps the application stateless prior to authentication.
 
 ---
 
 ## Dashboard Architecture
 
-`dashboard.php` is the largest file in the project. It serves as the central hub after login, rendering different content panels based on the user's role and navigation choice.
+`dashboard.php` acts as the single page application interface for authenticated users.
 
 ### Sidebar Navigation
 
-The sidebar is a fixed-position column on the left side of the screen. Its HTML is rendered inside `dashboard.php`. The sidebar menu items are different depending on whether the user is an admin or an employee:
+The sidebar layout adapts depending on the logged-in user's role:
 
-**Admin sees:**
-- Home (profile summary)
-- Employees → View
-- Employees → Update
-- Employees → Get Report
-- Admin → Reports
-- Logout
-
-**Employee sees:**
-- Home (profile summary)
-- My Workshops
-- Logout
-
-The sidebar has a toggle button (hamburger icon) that slides it in and out. On screens narrower than 768px, the sidebar starts collapsed by default. The sliding animation is handled by CSS transitions on `transform: translateX()`.
+- **Employees (Visible to both Admin and Karyashala Admin)**:
+  - **Home**: Profile details card.
+  - **View Employees**: Directory list with workshop timelines.
+  - **Update Info**: Directory list with edit access.
+  - **Add Employee**: Registration form for new employee profiles.
+- **Admin (Visible to Admin only)**:
+  - **Verification**: Workspaces grouped by year needing verification.
+  - **Verified Records**: Audit logs of verified items.
+- **Logout**: Triggers session teardown.
 
 ### Panel Switching
 
-All content areas (View Employees, Update Employees, Reports, etc.) exist in the HTML simultaneously as `<section>` elements with the class `content-panel`. Only one panel is visible at a time — the active one gets the class `active`, which sets `display: block`.
+Content panels are defined in HTML as `<section>` elements with the class `content-panel`. Only one panel is visible at a time (`active` class). 
 
-When the page loads, the active panel is determined by the `panel` query parameter:
+The initial active panel is determined on the server using the `panel` query parameter, defaulting to `home`. Once loaded, sidebar links trigger client-side switching via the `showPanel(name)` JavaScript function, avoiding page reloads.
 
-```
-dashboard.php?panel=employees-view
-```
+### Role-Based Access Control
 
-If no `panel` parameter is provided, the default is `home`. This is set in PHP:
-
-```php
-$activePanel = isset($_GET['panel']) ? htmlspecialchars($_GET['panel']) : 'home';
-```
-
-When a sidebar button is clicked, JavaScript calls `showPanel('panel-name')`, which hides all panels and shows the selected one. This happens entirely on the client side — no page reload is needed for switching panels.
-
-### Role-Based Rendering
-
-The PHP code uses `if ($designation === 'admin'):` blocks to conditionally output admin-only HTML. Employee-only sections use the `else` branch. This means the HTML for admin panels is never sent to employee browsers at all — it is not just hidden with CSS, it genuinely does not exist in the page source.
+Role division is enforced both on the client and server:
+- **Admin (Super Administrator)**: Has access to directory management (View, Update, Add, Delete) and exclusive access to the verification panels (`panel-admin-verification`, `panel-admin-verified-records`).
+- **Karyashala Admin (Directory Manager)**: Has access to directory management (View, Update, Add, Delete) but is restricted from accessing verification panels. PHP code enforces this by completely omitting Admin HTML panels and menu items from non-admin payloads.
 
 ---
 
-## Admin Features
+## Core Features
 
-### View Employees
+### View Employees Directory
 
-Displays a table of all employees fetched from the `employee` table. Each row has an eye icon button in the last column. Clicking it opens a modal that shows the employee's full details (IC, name, phone, email, registration date) in read-only form fields.
+Displays a table of all employees registered in the `karyashala_admin` table. Clicking the eye icon opens a details modal showing employee information, remarks, and a chronological vertical timeline of their attended workshops.
 
-The modal also includes a **workshops timeline** — a vertical timeline showing every workshop that employee has attended. The data comes from a PHP array (`$workshops_map`) that groups all `workshops` rows by `ic_no`. This array is JSON-encoded and passed directly to the JavaScript function `openViewModal(employee, workshops)` through the `onclick` attribute.
+### Update Employee Info & Workshops
 
-If the employee has no workshops, the timeline area shows a placeholder message.
+Provides an update modal with two tabs:
+1. **Personal Details**: Modify name, custom designation, phone, email, and remarks.
+2. **Workshops**: Edit existing workshop titles/dates or dynamically append new workshops to the history list.
 
-### Update Employees
+Submissions are handled by `update_karyashala_admin.php` inside a database transaction to ensure update integrity.
 
-Similar to View, but the modal fields are editable. The form submits to `update_employee.php`, which:
+### Add Employee
 
-1. Verifies the user is an admin (via session).
-2. Validates all fields server-side (non-empty, valid email, 10-digit phone).
-3. Checks that the new email is not already in use by another user (UNION query across both tables).
-4. Runs an `UPDATE` statement on the `employee` table.
-5. Redirects back to the dashboard with a success or error message.
+Allows directory managers to add new employees directly. Requires profile details (name, designation, phone, email, remark) and their initial workshop (title and date).
+`add_employee_process.php` handles this inside a transaction, writing the employee profile and the workshop simultaneously. The generated account is initialized with `NO_LOGIN` as its password hash to restrict login access.
 
-### Generate Reports
+### Delete Employee
 
-This panel displays all employees with checkboxes. The admin selects one or more employees and clicks "Generate Report". The form POSTs to `generate_report.php`, which:
-
-1. Takes the array of selected IC numbers.
-2. For each employee, runs a query that counts workshops attended in the current year and the previous year using conditional aggregation:
-
-```sql
-SUM(CASE WHEN YEAR(w.attended_date) = ? THEN 1 ELSE 0 END) as count_current,
-SUM(CASE WHEN YEAR(w.attended_date) = ? THEN 1 ELSE 0 END) as count_previous
-```
-
-3. Compiles all results into a PHP array containing `year_current`, `year_previous`, `generated_by`, and an `employees` array.
-4. Encodes it as JSON and saves it to the `reports` table.
-5. Redirects to the Reports panel.
-
-### View Reports
-
-Lists all saved reports from the `reports` table. Each report row has a "View" button that opens a modal. The modal parses the JSON content and renders it as a comparison table showing each employee's workshop count for the two years.
+Allows deleting an employee from `karyashala_admin`. Self-deletion is blocked using an active session check in `delete_employee.php`. Deleting an employee cascades to remove all associated workshops and verification records.
 
 ---
 
-## Employee Features
+## Admin Verification System
 
-### Add Workshop
+### Verification Panel
 
-Employees see a form where they can enter:
-- **Workshop title** — the name of the workshop they attended.
-- **Attended date** — a date picker for when they attended it.
+Displays workshops grouped by year. The page lists employees who attended workshops in that year. Clicking the verify icon opens a modal displaying employee details and their workshop history for the selected year. Clicking "Verify Details" submits to `verify_employee.php`, logging a new entry in `verified_records`.
 
-The form POSTs to `add_workshop.php`, which validates the inputs (non-empty, valid date format) and inserts a row into the `workshops` table using the employee's IC number from the session.
+### Verified Records Audit Log
 
-### View Workshop History
-
-On the same panel as the form, employees see a table listing all their previously logged workshops, sorted by date (newest first). This data is fetched in `dashboard.php` using a prepared statement that filters by the employee's `ic_no`.
+Displays a historical log of all verified employee records grouped by year, detailing the timestamp of verification, the verifier, and the specific workshops attended during that year.
 
 ---
 
 ## Logout Process
 
-`logout.php` performs a complete session teardown:
+`logout.php` executes a complete teardown of session states:
 
-1. Calls `session_start()` to resume the existing session.
-2. Clears all session variables: `$_SESSION = array()`.
-3. Deletes the session cookie from the browser by setting it to expire in the past.
-4. Calls `session_destroy()` to delete the session file from the server.
+1. Resumes active session with `session_start()`.
+2. Clears session array variables (`$_SESSION = []`).
+3. Sets the browser session cookie to expire in the past.
+4. Destroys the server session session file (`session_destroy()`).
 5. Redirects to `index.php?logout=1`.
-
-The `logout=1` query parameter triggers a success banner on the login page confirming the user has logged out.
 
 ---
 
 ## Client-Side Validation
 
-All form validation runs on both the client (JavaScript) and the server (PHP). The client-side validation in `script.js` provides instant feedback as the user types but is never relied upon as the sole line of defense — the server always re-validates.
+Forms implement live client-side validation in `script.js` to assist the user. The submit button is disabled until all inputs satisfy constraints:
 
-**Validation rules:**
-
-| Field  | Rule                                | Visual Feedback            |
-|--------|-------------------------------------|----------------------------|
-| Name   | Cannot contain digits               | Red border + error message |
-| Phone  | Must be exactly 10 digits           | Red border + error message |
-| Email  | Must match standard email pattern   | Red border + error message |
-| IC No  | Must contain only digits (login)    | Red border + error message |
-
-The submit button starts as `disabled` and is only enabled when all fields pass validation. This is controlled by a validation state object:
-
-```javascript
-const signupErrors = { name: false, phone: false, email: false };
-```
-
-Each field's `input` event triggers a validation function that updates the relevant flag. After every check, the code evaluates whether all flags are `true` and toggles the button accordingly.
+| Input Field | Rule | Feedback |
+| :--- | :--- | :--- |
+| **Name** | Cannot contain digits | Red border + warning |
+| **Phone** | Exactly 10 digits | Red border + warning |
+| **Email** | Matches standard email regex | Red border + warning |
+| **Password** | Minimum 6 characters | Red border + warning |
+| **Confirm Password** | Matches Password | Red border + warning |
+| **IC Number (Login)** | Numeric digits only | Red border + warning |
 
 ---
 
 ## Running the Application
 
-After the database is set up, start the PHP built-in development server:
+1. Make sure your local MySQL server is active and the database is configured.
+2. Navigate to the project folder and start the PHP development server:
 
 ```bash
 cd Karyashala
 php -S localhost:8000
 ```
 
-Open `http://localhost:8000` in your browser. You will see the Login/Sign Up page.
-
-To register a new user, switch to the Sign Up tab, fill in the form, and submit. Your IC number will be displayed — note it down. Then switch back to Login, enter your IC number, select your designation, and log in.
+3. Open `http://localhost:8000` in your web browser.
+4. Log in using an existing IC number and password, or register a new administrator/karyashala administrator account.
