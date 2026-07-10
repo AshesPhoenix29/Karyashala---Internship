@@ -27,8 +27,8 @@ $workshops_map = [];
 
 // Fetch all Karyashala Admins and their workshops for viewing/updating directory (visible to both Admin and Karyashala Admin)
 if ($designation === 'admin' || $designation === 'karyashala_admin') {
-    // Fetch all Karyashala Admins for tables
-    $emp_res = mysqli_query($conn, "SELECT * FROM karyashala_admin ORDER BY ic_no ASC");
+    // Fetch all Employees for tables (aliased to match old schema)
+    $emp_res = mysqli_query($conn, "SELECT ic_number AS ic_no, name, role AS designation, phone_number AS phone, email, remark, created_at FROM Employee ORDER BY ic_number ASC");
     if ($emp_res) {
         while ($row = mysqli_fetch_assoc($emp_res)) {
             $karyashala_admins[] = $row;
@@ -36,8 +36,8 @@ if ($designation === 'admin' || $designation === 'karyashala_admin') {
         mysqli_free_result($emp_res);
     }
 
-    // Fetch all workshops grouped by karyashala_admin ID
-    $ws_res = mysqli_query($conn, "SELECT * FROM workshops ORDER BY attended_date DESC");
+    // Fetch all workshops grouped by Employee ID
+    $ws_res = mysqli_query($conn, "SELECT id, ic_number AS ic_no, title, attended_date, created_at FROM workshop ORDER BY attended_date DESC");
     if ($ws_res) {
         while ($row = mysqli_fetch_assoc($ws_res)) {
             $workshops_map[$row['ic_no']][] = $row;
@@ -51,7 +51,7 @@ $verified_records_grouped = [];
 if ($designation === 'admin') {
     // 1. Fetch all verified records to construct the exclusion set
     $verified_set = [];
-    $verified_res = mysqli_query($conn, "SELECT ic_no, year FROM verified_records");
+    $verified_res = mysqli_query($conn, "SELECT ic_number AS ic_no, year FROM verified_record");
     if ($verified_res) {
         while ($row = mysqli_fetch_assoc($verified_res)) {
             $verified_set[$row['year']][$row['ic_no']] = true;
@@ -60,9 +60,10 @@ if ($designation === 'admin') {
     }
 
     // 2. Fetch and group workshops by year and employee for Verification (excluding verified ones)
-    $ver_q = "SELECT w.*, k.name, k.email, k.designation, k.phone, k.remark, k.created_at as emp_created_at 
-              FROM workshops w 
-              JOIN karyashala_admin k ON w.ic_no = k.ic_no 
+    $ver_q = "SELECT w.id, w.ic_number AS ic_no, w.title, w.attended_date, w.created_at,
+                     e.name, e.email, e.role AS designation, e.phone_number AS phone, e.remark, e.created_at as emp_created_at 
+              FROM workshop w 
+              JOIN Employee e ON w.ic_number = e.ic_number 
               ORDER BY w.attended_date DESC";
     $ver_res = mysqli_query($conn, $ver_q);
     if ($ver_res) {
@@ -102,10 +103,11 @@ if ($designation === 'admin') {
 
     // 3. Fetch and group verified records for "Verified Records" panel
     $verified_q = "
-        SELECT vr.*, k.name, k.email, k.designation, k.phone, k.remark, k.created_at as emp_created_at,
-               (SELECT COUNT(*) FROM workshops w WHERE w.ic_no = vr.ic_no AND YEAR(w.attended_date) = vr.year) as workshops_count
-        FROM verified_records vr
-        JOIN karyashala_admin k ON vr.ic_no = k.ic_no
+        SELECT vr.id, vr.ic_number AS ic_no, vr.year, vr.verified_at, vr.verified_by,
+               e.name, e.email, e.role AS designation, e.phone_number AS phone, e.remark, e.created_at as emp_created_at,
+               (SELECT COUNT(*) FROM workshop w WHERE w.ic_number = vr.ic_number AND YEAR(w.attended_date) = vr.year) as workshops_count
+        FROM verified_record vr
+        JOIN Employee e ON vr.ic_number = e.ic_number
         ORDER BY vr.year DESC, vr.verified_at DESC
     ";
     $v_res = mysqli_query($conn, $verified_q);
@@ -116,7 +118,7 @@ if ($designation === 'admin') {
             
             // We fetch the workshops attended in that year for the view details modal in Verified Records
             $workshops_in_year = [];
-            $ws_y_q = "SELECT * FROM workshops WHERE ic_no = ? AND YEAR(attended_date) = ? ORDER BY attended_date DESC";
+            $ws_y_q = "SELECT id, ic_number AS ic_no, title, attended_date, created_at FROM workshop WHERE ic_number = ? AND YEAR(attended_date) = ? ORDER BY attended_date DESC";
             $stmt_ws_y = mysqli_prepare($conn, $ws_y_q);
             if ($stmt_ws_y) {
                 mysqli_stmt_bind_param($stmt_ws_y, "ii", $ic, $year);

@@ -24,8 +24,14 @@ try {
     $user = null;
     $designation = '';
 
-    // 1. Check in admin table first
-    $query = "SELECT * FROM `admin` WHERE ic_no = ? LIMIT 1";
+    // Check Employee and role_table for login rights
+    $query = "
+        SELECT e.*, r.role as table_role 
+        FROM `Employee` e 
+        LEFT JOIN `role_table` r ON e.ic_number = r.ic_number 
+        WHERE e.ic_number = ? 
+        LIMIT 1
+    ";
     $stmt = mysqli_prepare($conn, $query);
     if ($stmt) {
         $icNoInt = (int)$icNo;
@@ -36,24 +42,10 @@ try {
         mysqli_stmt_close($stmt);
 
         if ($foundUser && password_verify($password, $foundUser['password'])) {
-            $user = $foundUser;
-            $designation = 'admin';
-        }
-    }
-
-    // 2. If not found or password incorrect in admin, check in karyashala_admin table
-    if (!$user) {
-        $query = "SELECT * FROM `karyashala_admin` WHERE ic_no = ? LIMIT 1";
-        $stmt = mysqli_prepare($conn, $query);
-        if ($stmt) {
-            $icNoInt = (int)$icNo;
-            mysqli_stmt_bind_param($stmt, "i", $icNoInt);
-            mysqli_stmt_execute($stmt);
-            $result = mysqli_stmt_get_result($stmt);
-            $foundUser = mysqli_fetch_assoc($result);
-            mysqli_stmt_close($stmt);
-
-            if ($foundUser && password_verify($password, $foundUser['password'])) {
+            if ($foundUser['table_role'] === 'admin') {
+                $user = $foundUser;
+                $designation = 'admin';
+            } else if ($foundUser['table_role'] === 'karyashala') {
                 $user = $foundUser;
                 $designation = 'karyashala_admin';
             }
@@ -63,11 +55,11 @@ try {
     if ($user) {
         // ONLY START SESSION HERE - when login is verified and required
         session_start();
-        $_SESSION['user_ic'] = $user['ic_no'];
+        $_SESSION['user_ic'] = $user['ic_number'];
         $_SESSION['user_name'] = $user['name'];
         $_SESSION['user_designation'] = $designation;
         $_SESSION['user_email'] = $user['email'];
-        $_SESSION['user_phone'] = $user['phone'];
+        $_SESSION['user_phone'] = $user['phone_number'];
 
         // Redirect to dashboard
         header("Location: dashboard.php");

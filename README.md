@@ -121,69 +121,57 @@ Or if you are already inside the MySQL shell:
 SOURCE /full/path/to/Karyashala/schema.sql;
 ```
 
-This creates the `karyashala` database (if it doesn't already exist) and sets up all five tables.
+This sets up the `karyashala` database tables and references.
 
 ---
 
 ### Schema Explanation
 
-The database consists of five tables designed to separate administrative privileges and maintain historical records:
+The database consists of four tables designed to unify employee data and maintain clean, normalized relational tables:
 
-#### 1. `admin`
-Stores system administrators who have super privileges, including the ability to audit and verify workshop records.
-
-| Column | Type | Notes |
-| :--- | :--- | :--- |
-| `ic_no` | INT | Primary key. Unique administrator ID. |
-| `name` | VARCHAR(100) | Full name of the administrator. |
-| `designation`| VARCHAR(20) | Defaults to `'admin'`. |
-| `phone` | VARCHAR(20) | 10-digit mobile number. |
-| `email` | VARCHAR(100) | Unique. Used for verification and uniqueness checks. |
-| `password` | VARCHAR(255) | Hashed password string. |
-| `created_at` | TIMESTAMP | Auto-filled when the row is inserted. |
-
-#### 2. `karyashala_admin`
-Stores employees/directory managers. These users can view, add, delete, and update employee entries and workshops, but do not have auditing/verification access.
+#### 1. `Employee`
+Unified table storing all employees in the system, including super administrators, directory managers (karyashala admins), and normal staff.
 
 | Column | Type | Notes |
 | :--- | :--- | :--- |
-| `ic_no` | INT | Primary key. Unique employee ID. |
+| `ic_number` | INT | Primary key. Unique Employee ID. |
 | `name` | VARCHAR(100) | Full name of the employee. |
-| `designation`| VARCHAR(20) | Defaults to `'karyashala_admin'` but can be customized. |
-| `phone` | VARCHAR(20) | 10-digit mobile number. |
-| `email` | VARCHAR(100) | Unique. |
-| `password` | VARCHAR(255) | Hashed password string (set to `'NO_LOGIN'` for dashboard-added employees). |
-| `remark` | TEXT | Optional custom notes or remarks about the employee. |
-| `created_at` | TIMESTAMP | Auto-filled when the row is inserted. |
-
-#### 3. `workshops`
-Contains details of the workshops attended by employees.
-
-| Column | Type | Notes |
-| :--- | :--- | :--- |
-| `id` | INT | Auto-incrementing primary key. |
-| `ic_no` | INT | Foreign key → `karyashala_admin.ic_no`. |
-| `title` | VARCHAR(255) | Title/Name of the workshop attended. |
-| `attended_date`| DATE | The date of attendance. |
+| `phone_number`| VARCHAR(20) | 10-digit mobile number. |
+| `email` | VARCHAR(100) | Unique email address. |
+| `role` | VARCHAR(20) | Designation role (e.g. `'admin'`, `'karyashala_admin'`, or NULL/empty space for normal staff). |
+| `password` | VARCHAR(255) | Hashed password string (set to `'NO_LOGIN'` for dashboard-added directory entries). |
+| `remark` | TEXT | Optional custom notes or remarks. |
 | `created_at` | TIMESTAMP | Auto-filled when inserted. |
 
-The foreign key has `ON DELETE CASCADE` — if an employee is deleted from the `karyashala_admin` table, all their workshop records are automatically removed.
+#### 2. `role_table`
+Maps employees to system dashboard roles, controlling login and panel authorization.
 
-#### 4. `verified_records`
-Logs verification audits performed by system administrators.
+| Column | Type | Notes |
+| :--- | :--- | :--- |
+| `ic_number` | INT | Primary key component & Foreign key → `Employee.ic_number` (Cascade delete). |
+| `role` | VARCHAR(20) | Primary key component. Security role: `'admin'` or `'karyashala'`. |
+
+#### 3. `workshop`
+Stores details of workshops attended by employees. This table is strictly normalized, referencing `Employee` to fetch employee info dynamically during runtime.
 
 | Column | Type | Notes |
 | :--- | :--- | :--- |
 | `id` | INT | Auto-incrementing primary key. |
-| `ic_no` | INT | Foreign key → `karyashala_admin.ic_no`. |
-| `year` | INT | The specific year of workshop attendance being verified. |
+| `ic_number` | INT | Foreign key → `Employee.ic_number` (Cascade delete). |
+| `title` | VARCHAR(255) | Title/Name of the attended workshop. |
+| `attended_date`| DATE | Date of workshop attendance. |
+| `created_at` | TIMESTAMP | Auto-filled when inserted. |
+
+#### 4. `verified_record`
+Logs verified attendance audits conducted by system administrators.
+
+| Column | Type | Notes |
+| :--- | :--- | :--- |
+| `id` | INT | Auto-incrementing primary key. |
+| `ic_number` | INT | Foreign key → `Employee.ic_number` (Cascade delete). |
+| `year` | INT | Year of workshop attendance being audited. |
 | `verified_at`| TIMESTAMP | Auto-filled when verified. |
-| `verified_by`| INT | The ID of the admin who verified the record. |
-
-Has a unique constraint on `(ic_no, year)` preventing multiple verifications for the same employee in a single year, and cascades `ON DELETE CASCADE` when the corresponding employee is deleted.
-
-#### 5. `reports` (Stale)
-Used historically for compiling attendance statistics. Present for reference but not linked in the current UI.
+| `verified_by`| INT | Foreign key → `Employee.ic_number` (The Admin IC that approved). |
 
 ---
 
@@ -211,57 +199,28 @@ When a user registers via the public signup tab, the form POSTs to `register.php
    - Ensures phone number is exactly 10 digits.
    - Requires password length to be at least 6 characters.
    - Checks that password and confirm password match.
-4. **Duplicate Email Check** — Queries both `admin` and `karyashala_admin` using a `UNION` statement to prevent duplicate accounts.
-5. **IC Number Generation** — Allocates the first free number starting from `1001` (see below).
+4. **Duplicate Email Check** — Queries `Employee` table directly to prevent duplicate accounts.
+5. **IC Number Generation** — Allocates the first free number starting from `1001` in the `Employee` table.
 6. **Password Hashing** — Hashes the password using `password_hash($password, PASSWORD_DEFAULT)`.
-7. **Insertion** — Saves the record in either `admin` or `karyashala_admin` depending on the selection.
+7. **Insertion Transaction** — Saves the record in the `Employee` table and inserts its mapped role assignment into the `role_table` table within a safe database transaction.
 8. **Redirect** — Sends the user back to `index.php` with their newly generated IC number on success, or an error banner on failure.
-
-### How IC Numbers Are Generated
-
-To prevent gaps and conflicts, IC numbers are globally unique positive integers. The system fetches all allocated IC numbers from both tables using a `UNION` query:
-
-```sql
-SELECT ic_no FROM admin
-UNION ALL
-SELECT ic_no FROM karyashala_admin
-ORDER BY ic_no ASC
-```
-
-It then initializes `nextIc = 1001` and increments it sequentially until it finds the first integer not present in the allocated set.
-
-### Duplicate Email Prevention
-
-Email uniqueness is verified across the entire system using:
-
-```sql
-SELECT email FROM (
-    SELECT email FROM admin WHERE email = ?
-    UNION ALL
-    SELECT email FROM karyashala_admin WHERE email = ?
-) AS combined LIMIT 1
-```
 
 ---
 
 ## Login Flow
 
-The login tab takes an **IC Number** and **Password** (designation is determined automatically by the server):
+The login tab takes an **IC Number** and **Password** (role is determined automatically by the server):
 
 1. **Validation** — Verifies fields are non-empty and IC number contains only digits.
 2. **Lookup & Table Routing**:
-   - Query `admin` table for the IC number. If found, verify the password using `password_verify()`.
-   - If not found in `admin` (or verification fails), query `karyashala_admin`. If found, verify password.
-3. **Success Path** — Starts the session and populates session variables (`user_ic`, `user_name`, `user_designation`, `user_email`, `user_phone`). Redirects to `dashboard.php`.
-4. **Failure Path** — Redirects back to `index.php` with an error parameter.
-
-### Password Verification
-
-Unlike earlier iterations, password security is strictly enforced. Passwords are saved as standard `PASSWORD_DEFAULT` hashes and verified at login using PHP's native `password_verify` function.
-
-### Where the Session Begins
-
-Sessions are initialized dynamically in `login_process.php` using `session_start()` only after credentials have been verified.
+   - Query `Employee` table using a `LEFT JOIN` on `role_table` to retrieve the employee profile and their mapped security role for the IC number.
+   - Verify the password using `password_verify()`.
+3. **Role Check**:
+   - If the user's role in `role_table` is `'admin'`, set `$_SESSION['user_designation']` to `'admin'`.
+   - If the role in `role_table` is `'karyashala'`, set `$_SESSION['user_designation']` to `'karyashala_admin'`.
+   - If the user exists but has no administrative role assignment, log in is rejected (normal staff do not have dashboard access).
+4. **Success Path** — Starts the session and populates session variables (`user_ic`, `user_name`, `user_designation`, `user_email`, `user_phone`). Redirects to `dashboard.php`.
+5. **Failure Path** — Redirects back to `index.php` with an error parameter.
 
 ---
 
@@ -321,24 +280,24 @@ Role division is enforced both on the client and server:
 
 ### View Employees Directory
 
-Displays a table of all employees registered in the `karyashala_admin` table. Clicking the eye icon opens a details modal showing employee information, remarks, and a chronological vertical timeline of their attended workshops.
+Displays a table of all employees registered in the `Employee` table. Clicking the eye icon opens a details modal showing employee information, remarks, and a chronological vertical timeline of their attended workshops (joined dynamically from the `workshop` table).
 
 ### Update Employee Info & Workshops
 
 Provides an update modal with two tabs:
-1. **Personal Details**: Modify name, custom designation, phone, email, and remarks.
-2. **Workshops**: Edit existing workshop titles/dates or dynamically append new workshops to the history list.
+1. **Personal Details**: Modify name, custom designation, phone, email, and remarks in `Employee`.
+2. **Workshops**: Edit existing workshop titles/dates or dynamically append new workshops to the history list in `workshop`.
 
-Submissions are handled by `update_karyashala_admin.php` inside a database transaction to ensure update integrity.
+Submissions are handled by `update_karyashala_admin.php` inside a database transaction to ensure update integrity across `Employee`, `role_table`, and `workshop`.
 
 ### Add Employee
 
 Allows directory managers to add new employees directly. Requires profile details (name, designation, phone, email, remark) and their initial workshop (title and date).
-`add_employee_process.php` handles this inside a transaction, writing the employee profile and the workshop simultaneously. The generated account is initialized with `NO_LOGIN` as its password hash to restrict login access.
+`add_employee_process.php` handles this inside a transaction, writing the employee profile to `Employee`, role configuration to `role_table` (if applicable), and the workshop to `workshop` simultaneously. The generated account is initialized with `NO_LOGIN` as its password hash to restrict login access.
 
 ### Delete Employee
 
-Allows deleting an employee from `karyashala_admin`. Self-deletion is blocked using an active session check in `delete_employee.php`. Deleting an employee cascades to remove all associated workshops and verification records.
+Allows deleting an employee from `Employee`. Self-deletion is blocked using an active session check in `delete_employee.php`. Deleting an employee cascades to automatically remove all associated workshops, role mappings, and verification records.
 
 ---
 
@@ -346,7 +305,7 @@ Allows deleting an employee from `karyashala_admin`. Self-deletion is blocked us
 
 ### Verification Panel
 
-Displays workshops grouped by year. The page lists employees who attended workshops in that year. Clicking the verify icon opens a modal displaying employee details and their workshop history for the selected year. Clicking "Verify Details" submits to `verify_employee.php`, logging a new entry in `verified_records`.
+Displays workshops grouped by year. The page lists employees who attended workshops in that year. Clicking the verify icon opens a modal displaying employee details and their workshop history for the selected year. Clicking "Verify Details" submits to `verify_employee.php`, logging a new entry in `verified_record`.
 
 ### Verified Records Audit Log
 

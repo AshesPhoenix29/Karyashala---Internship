@@ -29,7 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         // Prepare statement to insert verified record
-        $insert_query = "INSERT INTO verified_records (ic_no, year, verified_by) VALUES (?, ?, ?)";
+        $insert_query = "INSERT INTO verified_record (ic_number, year, verified_by) VALUES (?, ?, ?)";
         $stmt = mysqli_prepare($conn, $insert_query);
         if ($stmt) {
             mysqli_stmt_bind_param($stmt, "iii", $icNoInt, $yearInt, $verifiedByInt);

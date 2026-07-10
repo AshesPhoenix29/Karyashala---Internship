@@ -32,7 +32,7 @@ if ($icNoToDelete === $loggedInIc) {
 
 try {
     // Delete query
-    $query = "DELETE FROM karyashala_admin WHERE ic_no = ?";
+    $query = "DELETE FROM Employee WHERE ic_number = ?";
     $stmt = mysqli_prepare($conn, $query);
     if ($stmt) {
         mysqli_stmt_bind_param($stmt, "i", $icNoToDelete);

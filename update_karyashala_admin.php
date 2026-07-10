@@ -50,17 +50,15 @@ if (!preg_match('/^\d{10}$/', $phone)) {
 }
 
 try {
-    // Check if the email is already in use by someone else in admin or karyashala_admin
+    // Check if the email is already in use by someone else in Employee
     $email_check_query = "
-        SELECT email FROM admin WHERE email = ?
-        UNION ALL
-        SELECT email FROM karyashala_admin WHERE email = ? AND ic_no != ?
+        SELECT email FROM Employee WHERE email = ? AND ic_number != ?
     ";
     
     $stmt_check = mysqli_prepare($conn, $email_check_query);
     if ($stmt_check) {
         $icNoInt = (int)$icNo;
-        mysqli_stmt_bind_param($stmt_check, "ssi", $email, $email, $icNoInt);
+        mysqli_stmt_bind_param($stmt_check, "si", $email, $icNoInt);
         mysqli_stmt_execute($stmt_check);
         mysqli_stmt_store_result($stmt_check);
         $num_rows = mysqli_stmt_num_rows($stmt_check);
@@ -76,7 +74,16 @@ try {
     mysqli_begin_transaction($conn);
 
     // Execute update statement
-    $update_query = "UPDATE karyashala_admin SET name = ?, designation = ?, phone = ?, email = ?, remark = ? WHERE ic_no = ?";
+    $roleForEmployee = null;
+    if (strtolower($designation) === 'admin') {
+        $roleForEmployee = 'admin';
+    } else if (strtolower($designation) === 'karyashala_admin') {
+        $roleForEmployee = 'karyashala_admin';
+    } else if (!empty($designation)) {
+        $roleForEmployee = $designation;
+    }
+
+    $update_query = "UPDATE Employee SET name = ?, role = ?, phone_number = ?, email = ?, remark = ? WHERE ic_number = ?";
     $stmt_update = mysqli_prepare($conn, $update_query);
     
     if (!$stmt_update) {
@@ -84,12 +91,39 @@ try {
     }
     
     $icNoInt = (int)$icNo;
-    mysqli_stmt_bind_param($stmt_update, "sssssi", $name, $designation, $phone, $email, $remark, $icNoInt);
+    mysqli_stmt_bind_param($stmt_update, "sssssi", $name, $roleForEmployee, $phone, $email, $remark, $icNoInt);
     $success = mysqli_stmt_execute($stmt_update);
     mysqli_stmt_close($stmt_update);
     
     if (!$success) {
         throw new Exception("Failed to update employee record.");
+    }
+
+    // Synchronize roles in role_table
+    $delete_roles = "DELETE FROM role_table WHERE ic_number = ?";
+    $stmt_del = mysqli_prepare($conn, $delete_roles);
+    if ($stmt_del) {
+        mysqli_stmt_bind_param($stmt_del, "i", $icNoInt);
+        mysqli_stmt_execute($stmt_del);
+        mysqli_stmt_close($stmt_del);
+    }
+
+    if ($roleForEmployee === 'admin') {
+        $roleForTable = 'admin';
+    } else if ($roleForEmployee === 'karyashala_admin' || !empty($roleForEmployee)) {
+        $roleForTable = 'karyashala';
+    } else {
+        $roleForTable = null;
+    }
+
+    if ($roleForTable !== null) {
+        $insert_role = "INSERT INTO role_table (ic_number, role) VALUES (?, ?)";
+        $stmt_role = mysqli_prepare($conn, $insert_role);
+        if ($stmt_role) {
+            mysqli_stmt_bind_param($stmt_role, "is", $icNoInt, $roleForTable);
+            mysqli_stmt_execute($stmt_role);
+            mysqli_stmt_close($stmt_role);
+        }
     }
 
     // Update workshops if any
@@ -110,7 +144,7 @@ try {
                 throw new Exception("Invalid workshop date format.");
             }
             
-            $ws_query = "UPDATE workshops SET title = ?, attended_date = ? WHERE id = ? AND ic_no = ?";
+            $ws_query = "UPDATE workshop SET title = ?, attended_date = ? WHERE id = ? AND ic_number = ?";
             $stmt_ws = mysqli_prepare($conn, $ws_query);
             if (!$stmt_ws) {
                 throw new Exception("Workshop update preparation failed.");
@@ -142,7 +176,7 @@ try {
                 throw new Exception("Invalid new workshop date format.");
             }
             
-            $new_ws_query = "INSERT INTO workshops (ic_no, title, attended_date) VALUES (?, ?, ?)";
+            $new_ws_query = "INSERT INTO workshop (ic_number, title, attended_date) VALUES (?, ?, ?)";
             $stmt_new_ws = mysqli_prepare($conn, $new_ws_query);
             if (!$stmt_new_ws) {
                 throw new Exception("New workshop insert preparation failed.");

@@ -47,18 +47,12 @@ if (!preg_match('/^\d{10}$/', $phone)) {
     exit();
 }
 
-// 1. Check if email is already in use in EITHER admin or karyashala_admin table
-$email_check_query = "
-    SELECT email FROM (
-        SELECT email FROM admin WHERE email = ?
-        UNION ALL
-        SELECT email FROM karyashala_admin WHERE email = ?
-    ) AS combined LIMIT 1
-";
+// 1. Check if email is already in use in Employee table
+$email_check_query = "SELECT email FROM Employee WHERE email = ? LIMIT 1";
 
 $stmt_check = mysqli_prepare($conn, $email_check_query);
 if ($stmt_check) {
-    mysqli_stmt_bind_param($stmt_check, "ss", $email, $email);
+    mysqli_stmt_bind_param($stmt_check, "s", $email);
     mysqli_stmt_execute($stmt_check);
     mysqli_stmt_store_result($stmt_check);
     $num_rows = mysqli_stmt_num_rows($stmt_check);
@@ -72,16 +66,14 @@ if ($stmt_check) {
 
 // 2. Find the first free IC Number starting from 1001
 $query_all = "
-    SELECT ic_no FROM admin
-    UNION ALL
-    SELECT ic_no FROM karyashala_admin
-    ORDER BY ic_no ASC
+    SELECT ic_number FROM Employee
+    ORDER BY ic_number ASC
 ";
 $res_all = mysqli_query($conn, $query_all);
 $allocated = [];
 if ($res_all) {
     while ($row = mysqli_fetch_assoc($res_all)) {
-        $allocated[] = (int)$row['ic_no'];
+        $allocated[] = (int)$row['ic_number'];
     }
     mysqli_free_result($res_all);
 }
@@ -98,29 +90,25 @@ $unmatchablePassword = 'NO_LOGIN';
 mysqli_begin_transaction($conn);
 
 try {
-    // 5. Insert employee into appropriate table
+    // 5. Insert employee into Employee table
+    $roleForEmployee = null;
     if (strtolower($designation) === 'admin') {
-        $insert_query = "
-            INSERT INTO admin (ic_no, name, designation, phone, email, password) 
-            VALUES (?, ?, 'admin', ?, ?, ?)
-        ";
-        $stmt_insert = mysqli_prepare($conn, $insert_query);
-        if (!$stmt_insert) {
-            throw new Exception("Insert query preparation failed: " . mysqli_error($conn));
-        }
-        mysqli_stmt_bind_param($stmt_insert, "issss", $nextIc, $name, $phone, $email, $unmatchablePassword);
-    } else {
-        $insert_query = "
-            INSERT INTO karyashala_admin (ic_no, name, designation, phone, email, password, remark) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ";
-        $stmt_insert = mysqli_prepare($conn, $insert_query);
-        if (!$stmt_insert) {
-            throw new Exception("Insert query preparation failed: " . mysqli_error($conn));
-        }
-        mysqli_stmt_bind_param($stmt_insert, "issssss", $nextIc, $name, $designation, $phone, $email, $unmatchablePassword, $remark);
+        $roleForEmployee = 'admin';
+    } else if (strtolower($designation) === 'karyashala_admin') {
+        $roleForEmployee = 'karyashala_admin';
+    } else if (!empty($designation)) {
+        $roleForEmployee = $designation;
     }
 
+    $insert_query = "
+        INSERT INTO Employee (ic_number, name, phone_number, email, role, password, remark) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ";
+    $stmt_insert = mysqli_prepare($conn, $insert_query);
+    if (!$stmt_insert) {
+        throw new Exception("Insert query preparation failed: " . mysqli_error($conn));
+    }
+    mysqli_stmt_bind_param($stmt_insert, "issssss", $nextIc, $name, $phone, $email, $roleForEmployee, $unmatchablePassword, $remark);
     $exec_success = mysqli_stmt_execute($stmt_insert);
     mysqli_stmt_close($stmt_insert);
 
@@ -128,14 +116,41 @@ try {
         throw new Exception("Execution of insert user query failed.");
     }
 
-    // 6. Insert required workshop details
+    // 6. Insert corresponding role mapping into role_table if applicable
+    if ($roleForEmployee === 'admin') {
+        $roleForTable = 'admin';
+    } else if ($roleForEmployee === 'karyashala_admin' || !empty($roleForEmployee)) {
+        $roleForTable = 'karyashala';
+    } else {
+        $roleForTable = null;
+    }
+
+    if ($roleForTable !== null) {
+        $insert_role_query = "
+            INSERT INTO role_table (ic_number, role) 
+            VALUES (?, ?)
+        ";
+        $stmt_role = mysqli_prepare($conn, $insert_role_query);
+        if (!$stmt_role) {
+            throw new Exception("Role insert preparation failed: " . mysqli_error($conn));
+        }
+        mysqli_stmt_bind_param($stmt_role, "is", $nextIc, $roleForTable);
+        $exec_role = mysqli_stmt_execute($stmt_role);
+        mysqli_stmt_close($stmt_role);
+
+        if (!$exec_role) {
+            throw new Exception("Role insert execution failed.");
+        }
+    }
+
+    // 7. Insert required workshop details
     // Validate date format YYYY-MM-DD
     $dateParts = explode('-', $workshopDate);
     if (count($dateParts) !== 3 || !checkdate((int)$dateParts[1], (int)$dateParts[2], (int)$dateParts[0])) {
         throw new Exception("Invalid workshop date provided.");
     }
 
-    $insert_ws_query = "INSERT INTO workshops (ic_no, title, attended_date) VALUES (?, ?, ?)";
+    $insert_ws_query = "INSERT INTO workshop (ic_number, title, attended_date) VALUES (?, ?, ?)";
     $stmt_ws = mysqli_prepare($conn, $insert_ws_query);
     if (!$stmt_ws) {
         throw new Exception("Workshop insert preparation failed: " . mysqli_error($conn));

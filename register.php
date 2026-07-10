@@ -45,18 +45,12 @@ if ($password !== $confirmPassword) {
     exit();
 }
 
-// 1. Check if email is already in use in EITHER admin or karyashala_admin table
-$email_check_query = "
-    SELECT email FROM (
-        SELECT email FROM admin WHERE email = ?
-        UNION ALL
-        SELECT email FROM karyashala_admin WHERE email = ?
-    ) AS combined LIMIT 1
-";
+// 1. Check if email is already in use in Employee table
+$email_check_query = "SELECT email FROM Employee WHERE email = ? LIMIT 1";
 
 $stmt_check = mysqli_prepare($conn, $email_check_query);
 if ($stmt_check) {
-    mysqli_stmt_bind_param($stmt_check, "ss", $email, $email);
+    mysqli_stmt_bind_param($stmt_check, "s", $email);
     mysqli_stmt_execute($stmt_check);
     mysqli_stmt_store_result($stmt_check);
     $num_rows = mysqli_stmt_num_rows($stmt_check);
@@ -73,17 +67,15 @@ if ($stmt_check) {
 
 // 2. Find the first free IC Number starting from 1001
 $query_all = "
-    SELECT ic_no FROM admin
-    UNION ALL
-    SELECT ic_no FROM karyashala_admin
-    ORDER BY ic_no ASC
+    SELECT ic_number FROM Employee
+    ORDER BY ic_number ASC
 ";
 
 $res_all = mysqli_query($conn, $query_all);
 $allocated = [];
 if ($res_all) {
     while ($row = mysqli_fetch_assoc($res_all)) {
-        $allocated[] = (int)$row['ic_no'];
+        $allocated[] = (int)$row['ic_number'];
     }
     mysqli_free_result($res_all);
 }
@@ -96,33 +88,58 @@ while (in_array($nextIc, $allocated)) {
 // 3. Hash the password
 $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
-// 4. Insert the record into the appropriate table
-if ($designation === 'admin') {
-    $insert_query = "
-        INSERT INTO admin (ic_no, name, designation, phone, email, password) 
-        VALUES (?, ?, 'admin', ?, ?, ?)
-    ";
-} else {
-    $insert_query = "
-        INSERT INTO karyashala_admin (ic_no, name, designation, phone, email, password) 
-        VALUES (?, ?, 'karyashala_admin', ?, ?, ?)
-    ";
-}
+// 4. Begin transaction (procedural style)
+mysqli_begin_transaction($conn);
 
-$stmt_insert = mysqli_prepare($conn, $insert_query);
-$exec_success = false;
-
-if ($stmt_insert) {
-    mysqli_stmt_bind_param($stmt_insert, "issss", $nextIc, $name, $phone, $email, $hashedPassword);
+try {
+    // Insert the record into the Employee table
+    $roleForEmployee = ($designation === 'admin') ? 'admin' : 'karyashala_admin';
+    $insert_emp_query = "
+        INSERT INTO Employee (ic_number, name, phone_number, email, role, password) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    ";
+    
+    $stmt_insert = mysqli_prepare($conn, $insert_emp_query);
+    if (!$stmt_insert) {
+        throw new Exception("Employee insert preparation failed: " . mysqli_error($conn));
+    }
+    mysqli_stmt_bind_param($stmt_insert, "isssss", $nextIc, $name, $phone, $email, $roleForEmployee, $hashedPassword);
     $exec_success = mysqli_stmt_execute($stmt_insert);
     mysqli_stmt_close($stmt_insert);
-}
 
-if ($exec_success) {
+    if (!$exec_success) {
+        throw new Exception("Employee insert execution failed.");
+    }
+
+    // Insert the record into the role_table
+    $roleForTable = ($designation === 'admin') ? 'admin' : 'karyashala';
+    $insert_role_query = "
+        INSERT INTO role_table (ic_number, role) 
+        VALUES (?, ?)
+    ";
+    
+    $stmt_role = mysqli_prepare($conn, $insert_role_query);
+    if (!$stmt_role) {
+        throw new Exception("Role insert preparation failed: " . mysqli_error($conn));
+    }
+    mysqli_stmt_bind_param($stmt_role, "is", $nextIc, $roleForTable);
+    $exec_role = mysqli_stmt_execute($stmt_role);
+    mysqli_stmt_close($stmt_role);
+
+    if (!$exec_role) {
+        throw new Exception("Role insert execution failed.");
+    }
+
+    // Commit transaction
+    mysqli_commit($conn);
+
     header("Location: index.php?success=" . $nextIc);
     exit();
-} else {
-    header("Location: index.php?error=" . urlencode("An error occurred during registration: " . mysqli_error($conn)));
+
+} catch (Exception $e) {
+    // Rollback transaction on failure
+    mysqli_rollback($conn);
+    header("Location: index.php?error=" . urlencode("An error occurred during registration: " . $e->getMessage()));
     exit();
 }
 ?>
