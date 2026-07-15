@@ -101,9 +101,9 @@ graph TD
     WebServer <-->|MySQLi Procedural Queries| Database[(MySQL Database)]
     
     subgraph client_side ["Vanilla Web Stack"]
-        Client --> Validation[Form Validation (script.js)]
-        Client --> PanelSwitching[SPA Panel Switching (script.js)]
-        Client --> Modals[Interactive Modals (script.js)]
+        Client --> Validation["Form Validation (script.js)"]
+        Client --> PanelSwitching["SPA Panel Switching (script.js)"]
+        Client --> Modals["Interactive Modals (script.js)"]
     end
     
     subgraph server_side ["Procedural PHP Handlers"]
