@@ -8,24 +8,30 @@ A workshop attendance management system built with procedural PHP and MySQL, des
 
 1. [Prerequisites](#prerequisites)
 2. [Project Structure](#project-structure)
-3. [Database Setup](#database-setup)
+3. [System Design & Architecture](#system-design--architecture)
+   - [Architectural Overview](#architectural-overview)
+   - [Role-Based Access Control (RBAC)](#role-based-access-control-rbac)
+   - [Database Schema & Relationships](#database-schema--relationships)
+4. [Database Setup](#database-setup)
    - [Creating the MySQL User](#creating-the-mysql-user)
    - [Running the Schema](#running-the-schema)
    - [Schema Explanation](#schema-explanation)
-4. [How the Application Starts](#how-the-application-starts)
-5. [Registration Flow](#registration-flow)
-   - [How IC Numbers Are Generated](#how-ic-numbers-are-generated)
-   - [Duplicate Email Prevention](#duplicate-email-prevention)
-6. [Login Flow](#login-flow)
-   - [Password Verification](#password-verification)
-   - [Where the Session Begins](#where-the-session-begins)
+5. [Project Workflows](#project-workflows)
+   - [Registration & Setup Workflow](#registration--setup-workflow)
+   - [Authentication (Login) Workflow](#authentication-login-workflow)
+   - [Employee Directory Management Workflow](#employee-directory-management-workflow)
+   - [Admin Verification & Auditing Workflow](#admin-verification--auditing-workflow)
+6. [Transactional Integrity & Safety Guards](#transactional-integrity--safety-guards)
+   - [ACID Transactions](#acid-transactions)
+   - [Self-Deletion Prevention](#self-deletion-prevention)
+   - [Password Security](#password-security)
+   - [Prepared Statements & XSS Protection](#prepared-statements--xss-protection)
 7. [Session Management](#session-management)
    - [Conditional Session Startup](#conditional-session-startup)
    - [How Alerts Work Without Sessions](#how-alerts-work-without-sessions)
 8. [Dashboard Architecture](#dashboard-architecture)
    - [Sidebar Navigation](#sidebar-navigation)
    - [Panel Switching](#panel-switching)
-   - [Role-Based Access Control](#role-based-access-control)
 9. [Core Features](#core-features)
    - [View Employees Directory](#view-employees-directory)
    - [Update Employee Info & Workshops](#update-employee-info--workshops)
@@ -37,6 +43,7 @@ A workshop attendance management system built with procedural PHP and MySQL, des
 11. [Logout Process](#logout-process)
 12. [Client-Side Validation](#client-side-validation)
 13. [Running the Application](#running-the-application)
+14. [Stale & Legacy Files](#stale--legacy-files)
 
 ---
 
@@ -75,6 +82,88 @@ Karyashala/
 ```
 
 The application does not use a router or MVC framework. Each `.php` file is either a **page** (renders HTML) or a **processor** (handles form data and redirects). The two main page files are `index.php` and `dashboard.php`. Everything else is a processor — they receive POST data, do their work, and redirect back with a success or error message in the URL.
+
+---
+
+## System Design & Architecture
+
+### Architectural Overview
+
+The application follows a client-server architecture utilizing **Procedural PHP** as the backend engine and a **MySQL** database for persistence. Key features of the architecture include:
+
+- **Stateless Router-less File Routing**: Each PHP file acts as a standalone request handler or page renderer.
+- **Hybrid Page/State Loading**: The app uses page redirects for form processing but operates as a **Single Page Application (SPA)** on `dashboard.php` using client-side JavaScript for tab/panel switching to provide a smooth, modern user experience without full page reloads.
+- **Cascading Relational Integrity**: Relational tables rely on database-level constraints with cascading deletes on the MySQL level to maintain database cleanliness.
+
+```mermaid
+graph TD
+    Client[Client Browser] <-->|HTTP POST / GET| WebServer[PHP Development Server]
+    WebServer <-->|MySQLi Procedural Queries| Database[(MySQL Database)]
+    
+    subgraph Client-Side "Vanilla Web Stack"
+        Client --> Validation[Form Validation (script.js)]
+        Client --> PanelSwitching[SPA Panel Switching (script.js)]
+        Client --> Modals[Interactive Modals (script.js)]
+    end
+    
+    subgraph Server-Side "Procedural PHP Handlers"
+        WebServer --> Auth[login_process.php / register.php / logout.php]
+        WebServer --> Dashboard[dashboard.php]
+        WebServer --> Directory[add_employee_process.php / update_karyashala_admin.php / delete_employee.php]
+        WebServer --> Verify[verify_employee.php]
+    end
+```
+
+### Role-Based Access Control (RBAC)
+
+The application enforces a strict role-based capability model. System security levels are categorized into three roles:
+
+| Access Role | Mapped DB Role | Dashboard Privileges | Form Access |
+| :--- | :--- | :--- | :--- |
+| **System Administrator** | `admin` | View, Update, Add, Delete Employees, Year Verification, Audit Logs | Complete |
+| **Karyashala Administrator** | `karyashala_admin` | View, Update, Add, Delete Employees | Restricted (No Verification / Auditing) |
+| **Normal Staff** | `NULL` or other | None (Access Denied at Login) | None |
+
+### Database Schema & Relationships
+
+The database is built on four core tables, mapped below with their entity relationships:
+
+```mermaid
+erDiagram
+    Employee {
+        INT ic_number PK "Unique Employee ID (starts at 1001)"
+        VARCHAR name "Full Name"
+        VARCHAR phone_number "10-Digit Mobile"
+        VARCHAR email UK "Unique Email Address"
+        VARCHAR role "Security/Designation Role"
+        VARCHAR password "Hashed Password or 'NO_LOGIN'"
+        TEXT remark "Custom notes"
+        TIMESTAMP created_at "Auto Timestamp"
+    }
+    role_table {
+        INT ic_number PK, FK "References Employee (Cascade)"
+        VARCHAR role PK "Role Assignment ('admin' or 'karyashala')"
+    }
+    workshop {
+        INT id PK "Auto-Increment"
+        INT ic_number FK "Attendee Reference (Cascade)"
+        VARCHAR title "Workshop Title"
+        DATE attended_date "Date attended"
+        TIMESTAMP created_at "Registration date"
+    }
+    verified_record {
+        INT id PK "Auto-Increment"
+        INT ic_number FK "Audited Employee Reference (Cascade)"
+        INT year UK "Audited Year"
+        TIMESTAMP verified_at "Verification date"
+        INT verified_by FK "Verifier IC Reference (Cascade)"
+    }
+
+    Employee ||--o| role_table : "has role mapping"
+    Employee ||--o{ workshop : "attends"
+    Employee ||--o{ verified_record : "is audited in"
+    Employee ||--o{ verified_record : "verifies (as verifier)"
+```
 
 ---
 
@@ -175,52 +264,145 @@ Logs verified attendance audits conducted by system administrators.
 
 ---
 
-## How the Application Starts
+## Project Workflows
 
-The entry point is `index.php`. When a user navigates to the site:
+The application coordinates data changes through specific client-server workflows, detailed below:
 
-1. PHP checks if a session cookie already exists in the browser (`$_COOKIE[session_name()]`).
-2. If the cookie exists, `session_start()` is called and session data is loaded.
-3. If the session contains `user_ic` (meaning the user is logged in), they are immediately redirected to `dashboard.php`.
-4. If no session cookie exists, no session is started. The page renders the Login/Sign Up tabs as plain HTML.
+### Registration & Setup Workflow
+
+When a visitor registers an administrative account on the public sign-up page:
+
+1. **Client-side Verification**: `script.js` validates parameters in real-time.
+2. **Server-side Validation**: Handled by `register.php`. Ensures no field is left blank, formats match, and that the email is unique in the `Employee` table.
+3. **IC Number Allocation**: Query checks existing records to find the first unused integer starting from `1001` to use as the employee's `ic_number`.
+4. **Transactional Write**: Inserts the hashed password and user profile into `Employee`, and writes the corresponding designation mapping to `role_table` in a safe database transaction.
+5. **Completion Alert**: The user is redirected to `index.php` showing their newly generated unique login ID.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Index as index.php
+    participant Script as script.js
+    participant Register as register.php
+    participant DB as MySQL Database
+
+    User->>Index: Select Registration Tab
+    User->>Index: Fill form inputs
+    Index->>Script: Live input events
+    Note over Script: Validates Name, Email,<br/>Phone format, Password match
+    Script-->>Index: Enable Sign Up Button
+    User->>Index: Click Sign Up
+    Index->>Register: HTTP POST
+    Note over Register: Server-side validation
+    Register->>DB: Query existing email
+    DB-->>Register: Email unique status
+    Register->>DB: Query allocated IC numbers
+    DB-->>Register: List of IC numbers
+    Note over Register: Generates first free IC >= 1001
+    Register->>DB: Begin Transaction
+    Register->>DB: Insert Employee details
+    Register->>DB: Insert role mapping in role_table
+    Register->>DB: Commit Transaction
+    Register-->>Index: Redirect with ?success=IC_NUMBER
+    Index-->>User: Render Success Alert Banner
+```
+
+### Authentication (Login) Workflow
+
+For existing administrators logging in:
+
+1. **Submit**: Credential fields (IC Number and Password) are posted to `login_process.php`.
+2. **Database Lookup**: Selects the user from `Employee` joined on `role_table` using the provided IC Number.
+3. **Password Verification**: Validates the plaintext password against the database hash using `password_verify()`.
+4. **Privilege Mapping**: If authentication succeeds and the user has a valid administrative role mapped, the session is created. If no role is mapped (normal staff), access is denied.
+5. **Session Initiation**: Session variables (`user_ic`, `user_name`, `user_designation`, `user_email`, `user_phone`) are instantiated, and the user is redirected to `dashboard.php`.
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Index as index.php
+    participant Process as login_process.php
+    participant DB as MySQL Database
+    participant Dash as dashboard.php
+
+    User->>Index: Enter IC Number & Password
+    User->>Index: Click Log In
+    Index->>Process: HTTP POST
+    Note over Process: Sanitization & format checks
+    Process->>DB: Select Employee JOIN role_table by IC
+    DB-->>Process: Employee & Role Data
+    Note over Process: password_verify(password, hash)
+    Note over Process: Determine role ('admin' or 'karyashala_admin')
+    Process->>Process: session_start() & populate $_SESSION
+    Process-->>Dash: Redirect to dashboard.php
+    Dash-->>User: Render dashboard panel
+```
+
+### Employee Directory Management Workflow
+
+Authenticated managers (both Admin and Karyashala Admin) handle employee registrations and updates through the dashboard directory:
+
+- **Add Employee**: Registers staff details and their first attended workshop. A database transaction ensures `Employee`, `role_table`, and `workshop` records are inserted atomically. The account password is set to `'NO_LOGIN'` so they cannot log in.
+- **Update Details**: Dynamic tabs inside the update modal let the manager update personal information and edit or add workshops. Dynamic inputs allow adding multiple workshops concurrently. Changes are submitted to `update_karyashala_admin.php` and applied atomically inside a transaction.
+- **Delete Record**: Deleting an employee removes their `Employee` record. Foreign keys with `ON DELETE CASCADE` automatically clean up all associated `role_table` mappings, `workshop` entries, and `verified_record` logs. The logged-in admin is prevented from deleting their own account via a session check.
+
+### Admin Verification & Auditing Workflow
+
+Auditing and verification are restricted to the **System Administrator** (`admin` role):
+
+1. **Grouping**: The dashboard pulls workshops and groups them by year and employee.
+2. **Filtering**: Already verified records (matching a record in `verified_record` for that year and employee) are filtered out of the verification queue.
+3. **Admin Verification**: The admin selects an unverified employee's list of workshops, reviews them, and clicks "Verify Details".
+4. **Execution**: The verification request posts to `verify_employee.php`. It writes a new entry to `verified_record` including the Admin's IC Number (verifier) and the verified year.
+5. **Auditing**: The verified entry disappears from the Verification list and shows up in the historical **Verified Records** audit log page.
+
+```mermaid
+sequenceDiagram
+    actor Admin
+    participant Dash as dashboard.php
+    participant Verify as verify_employee.php
+    participant DB as MySQL Database
+
+    Admin->>Dash: Select Verification Panel
+    Note over Dash: Fetch workshops grouped by year
+    Note over Dash: Filter out already verified records
+    Dash-->>Admin: Show unverified list by year
+    Admin->>Dash: Click Verify Icon
+    Dash-->>Admin: Render Modal with Employee and Workshop history
+    Admin->>Dash: Click "Verify Details"
+    Dash->>Verify: HTTP POST (ic_no, year)
+    Note over Verify: Verify session and role is 'admin'
+    Verify->>DB: INSERT INTO verified_record (ic_number, year, verified_by)
+    DB-->>Verify: Success
+    Verify-->>Dash: Redirect with ?success=Verification+completed
+    Note over Dash: Record shifts from Verification queue to Verified Records
+    Dash-->>Admin: Render updated panels & success banner
+```
 
 ---
 
-## Registration Flow
+## Transactional Integrity & Safety Guards
 
-When a user registers via the public signup tab, the form POSTs to `register.php`:
+### ACID Transactions
 
-1. **Method Check** — Redirects GET requests to `index.php`.
-2. **Input Collection** — Name, Designation (`admin` or `karyashala_admin`), Phone, Email, Password, and Confirm Password are collected.
-3. **Server-Side Validation**:
-   - Checks that all fields are non-empty.
-   - Ensures designation is either `'admin'` or `'karyashala_admin'`.
-   - Validates email format.
-   - Ensures phone number is exactly 10 digits.
-   - Requires password length to be at least 6 characters.
-   - Checks that password and confirm password match.
-4. **Duplicate Email Check** — Queries `Employee` table directly to prevent duplicate accounts.
-5. **IC Number Generation** — Allocates the first free number starting from `1001` in the `Employee` table.
-6. **Password Hashing** — Hashes the password using `password_hash($password, PASSWORD_DEFAULT)`.
-7. **Insertion Transaction** — Saves the record in the `Employee` table and inserts its mapped role assignment into the `role_table` table within a safe database transaction.
-8. **Redirect** — Sends the user back to `index.php` with their newly generated IC number on success, or an error banner on failure.
+The system uses standard ACID database transactions (`mysqli_begin_transaction($conn)`) for multi-step directory insertions and edits:
 
----
+- When adding a new employee, inserting data into `Employee`, mapping their role in `role_table`, and inserting their first workshop in `workshop` must succeed together. If any insert fails (e.g. database error, duplicate unique key, or invalid date), the transaction is rolled back via `mysqli_rollback($conn)`, preventing orphan records.
+- When updating an employee, personal info changes, workshop updates, and new workshop additions are grouped into a transaction block to maintain database consistency.
 
-## Login Flow
+### Self-Deletion Prevention
 
-The login tab takes an **IC Number** and **Password** (role is determined automatically by the server):
+To prevent administrators from locking themselves out of the system, `delete_employee.php` checks the target ID against the active session `$_SESSION['user_ic']`. If they match, the request is rejected with a safety warning banner.
 
-1. **Validation** — Verifies fields are non-empty and IC number contains only digits.
-2. **Lookup & Table Routing**:
-   - Query `Employee` table using a `LEFT JOIN` on `role_table` to retrieve the employee profile and their mapped security role for the IC number.
-   - Verify the password using `password_verify()`.
-3. **Role Check**:
-   - If the user's role in `role_table` is `'admin'`, set `$_SESSION['user_designation']` to `'admin'`.
-   - If the role in `role_table` is `'karyashala'`, set `$_SESSION['user_designation']` to `'karyashala_admin'`.
-   - If the user exists but has no administrative role assignment, log in is rejected (normal staff do not have dashboard access).
-4. **Success Path** — Starts the session and populates session variables (`user_ic`, `user_name`, `user_designation`, `user_email`, `user_phone`). Redirects to `dashboard.php`.
-5. **Failure Path** — Redirects back to `index.php` with an error parameter.
+### Password Security
+
+- **Hashing**: Public registrations hash user passwords using `password_hash($password, PASSWORD_DEFAULT)`, storing them securely.
+- **NO_LOGIN Restrictions**: Employees added by managers via the dashboard do not require a login. Their password string is initialized to `'NO_LOGIN'`, which is unmatchable by `password_verify()`. This prevents unauthorized access to the system dashboard while keeping database column constraints intact.
+
+### Prepared Statements & XSS Protection
+
+- **SQL Injection Prevention**: All queries that accept user inputs use parameterized prepared statements (`mysqli_prepare`, `mysqli_stmt_bind_param`, and `mysqli_stmt_execute`). No direct input concatenation is allowed.
+- **XSS Prevention**: User inputs rendered in PHP templates are sanitised using `htmlspecialchars()`. Dynamic client side elements are rendered safely via text node assignments or escaped values.
 
 ---
 
@@ -267,12 +449,6 @@ The sidebar layout adapts depending on the logged-in user's role:
 Content panels are defined in HTML as `<section>` elements with the class `content-panel`. Only one panel is visible at a time (`active` class). 
 
 The initial active panel is determined on the server using the `panel` query parameter, defaulting to `home`. Once loaded, sidebar links trigger client-side switching via the `showPanel(name)` JavaScript function, avoiding page reloads.
-
-### Role-Based Access Control
-
-Role division is enforced both on the client and server:
-- **Admin (Super Administrator)**: Has access to directory management (View, Update, Add, Delete) and exclusive access to the verification panels (`panel-admin-verification`, `panel-admin-verified-records`).
-- **Karyashala Admin (Directory Manager)**: Has access to directory management (View, Update, Add, Delete) but is restricted from accessing verification panels. PHP code enforces this by completely omitting Admin HTML panels and menu items from non-admin payloads.
 
 ---
 
@@ -352,3 +528,9 @@ php -S localhost:8000
 
 3. Open `http://localhost:8000` in your web browser.
 4. Log in using an existing IC number and password, or register a new administrator/karyashala administrator account.
+
+---
+
+## Stale & Legacy Files
+
+The repository contains `generate_report.php`, which is a legacy script from a previous version of the codebase. It relies on deprecated tables (`karyashala_admin`, `workshops`, and `reports`) that are no longer part of the unified database schema (`schema.sql`). It is retained for archival purposes but is not integrated or linked anywhere in the current user interface.
