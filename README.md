@@ -100,13 +100,13 @@ graph TD
     Client[Client Browser] <-->|HTTP POST / GET| WebServer[PHP Development Server]
     WebServer <-->|MySQLi Procedural Queries| Database[(MySQL Database)]
     
-    subgraph Client-Side "Vanilla Web Stack"
+    subgraph client_side ["Vanilla Web Stack"]
         Client --> Validation[Form Validation (script.js)]
         Client --> PanelSwitching[SPA Panel Switching (script.js)]
         Client --> Modals[Interactive Modals (script.js)]
     end
     
-    subgraph Server-Side "Procedural PHP Handlers"
+    subgraph server_side ["Procedural PHP Handlers"]
         WebServer --> Auth[login_process.php / register.php / logout.php]
         WebServer --> Dashboard[dashboard.php]
         WebServer --> Directory[add_employee_process.php / update_karyashala_admin.php / delete_employee.php]
